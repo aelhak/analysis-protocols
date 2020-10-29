@@ -1,90 +1,136 @@
 # Use environment to store some path variables to use in different functions
-lifecycle.globals <- new.env()
+ds_upload.globals <- new.env()
 
-cohorts <- c('dnbc', 'gecko', 'alspac', 'genr', 'moba', 'sws', 'bib', 'chop', 'elfe', 'eden', 'ninfea', 'hbcs', 'inma', 'isglobal', 'nfbc66', 'nfbc86', 'raine', 'rhea')
-cohort_urls <- c('https://opal.sund.ku.dk', 'https://opal.gcc.rug.nl', '', 'https://opal.erasmusmc.nl', 'https://moba.nhn.no', 'https://opal.mrc.soton.ac.uk:8443', '', 'https://lifecycle-project.med.uni-muenchen.de', 'https://elfe-opal.sicopre.elfe-france.fr', '', 'https://www.lifecycle-ninfea.unito.it', '', '', 'https://opal.isglobal.org', '', '', 'https://opal.gohad.uwa.edu.au', '')
-
-lifecycle.globals$input_formats <- c('CSV', 'STATA', 'SPSS', 'SAS')
-lifecycle.globals$variable_category <- c('ALL','META','MATERNAL','PATERNAL','CHILD','HOUSEHOLD')
-lifecycle.globals$cohorts <- setNames(as.list(cohort_urls), cohorts)
-lifecycle.globals$cohort_ids <- cohorts
-lifecycle.globals$dictionaries_core <- c('1_0', '1_1')
+ds_upload.globals$api_dict_released_url <- "https://api.github.com/repos/lifecycle-project/ds-dictionaries/contents/"
+ds_upload.globals$api_dict_beta_url <- "https://api.github.com/repos/lifecycle-project/ds-beta-dictionaries/contents/"
 
 #' Numerical extraction function
 #' Number at the end of the string: Indicates year. We need to extract this to create the age_years variable.
 #' This is the function to do so.
-#' 
+#'
 #' @param input_string convert this string into an integer value
-#' 
+#'
 #' @importFrom stringr str_extract
-#' 
-numextract <- local(function(input_string) { 
-  str_extract(input_string, "\\d*$") 
+#'
+#' @keywords internal
+du.num.extract <- local(function(input_string) {
+  str_extract(input_string, "\\d*$")
 })
 
 #' This function creates a summary table
-#' 
+#'
 #' @param df data frame to summarise
 #' @param .var variable to summarise
-#' 
+#'
 #' @importFrom dplyr summarise n
 #' @importFrom rlang sym
 #' @importFrom stats median
-#' 
+#'
 #' @return a summary of the data
-#' 
-summarizeR <- local(function(df, .var) {
-  
+#'
+#' @keywords internal
+du.summarize <- local(function(df, .var) {
   .var <- sym(.var)
-  
-  data_summary <- df %>%
-    summarise(variable=paste(.var),
-                     min = min(!! .var, na.rm = TRUE),
-                     max = max(!! .var, na.rm = TRUE),
-                     median = median(!! .var, na.rm = TRUE),
-                     mean = mean(!! .var, na.rm = TRUE),
-                     n=n(),
-                     missing=sum(is.na(!! .var))
-    )
+
+  data_summary <- df %>% summarise(
+    variable = paste(.var), min = min(!!.var, na.rm = TRUE),
+    max = max(!!.var, na.rm = TRUE), median = median(!!.var, na.rm = TRUE), mean = mean(!!.var,
+      na.rm = TRUE
+    ), n = n(), missing = sum(is.na(!!.var))
+  )
   return(data_summary)
 })
 
 #'
 #' Check if the given version matches the syntax number . underscore . number
-#' 
+#'
 #' @param version the version input of the user
-#' 
+#'
 #' @importFrom stringr str_detect
 #'
-checkVersion <- local(function(version) {
+#' @keywords internal
+du.check.version <- local(function(version) {
   return(str_detect(version, "\\d+\\_\\d+"))
 })
 
-#' Read the input file from different sources
-#' 
-#' @param input_format possible formats are CSV,STATA,SPSS or SAS (default = CSV)
-#' @param input_path path for importfile
-#' 
-#' @importFrom readr read_csv cols col_double
-#' @importFrom haven read_dta read_sas read_spss
-#' 
-#' @return dataframe with source data
-#'  
-lc.read.source.file <- local(function(input_path, input_format = 'CSV') {
-  lc_data <- NULL
-  
-  if(missing(input_path)) {
-    input_path <- readline('- Specify input path (for your data): ')
-    input_format <- readline('- Specify input format (possible formats: CSV,STATA,SPSS or SAS - default = CSV): ')
-  }
-  if (input_format %in% lifecycle.globals$input_formats) {
-    if (input_format == 'STATA') lc_data <- read_dta(input_path)
-    else if (input_format == 'SPSS') lc_data <- read_spss(input_path)
-    else if (input_format == 'SAS') lc_data <- read_sas(input_path)
-    else lc_data <- read_csv(input_path, col_types = cols(.default = col_double()))
-  } else {
-    stop(paste(input_format, ' is not a valid input format, Possible input formats are: ', lifecycle.globals$input_formats, sep = ','))
-  }
-  
-  return(lc_data)
+#'
+#' Parse response to dataframe
+#'
+#' @param url get this location
+#'
+#' @importFrom httr GET content
+#' @importFrom jsonlite fromJSON
+#'
+#' @return response as dataframe
+#'
+#' @keywords internal
+du.get.response.as.dataframe <- local(function(url) {
+  response <- GET(url)
+  json_response <- content(response, as = "text")
+  return(fromJSON(json_response))
 })
+
+#' Check if there is an active session with a DataSHIELD backend
+#'
+#' @param upload is a session needed or not
+#'
+#' @keywords internal
+du.check.session <- function(upload = FALSE) {
+  if (upload == TRUE) {
+    if (!exists("hostname", envir = ds_upload.globals)) {
+      stop("You need to login first, please run du.login")
+    }
+    if (!exists("username", envir = ds_upload.globals)) {
+      stop("You need to login first, please run du.login")
+    }
+  }
+}
+
+#' Check is action is the correct value
+#'
+#' @param action action to perform
+#'
+#' @keywords internal
+du.check.action <- function(action = "all") {
+  if (!(action %in% c("all", "reshape", "populate"))) {
+    stop("Unknown action type, please fill in 'populate', 'reshape' or 'all'")
+  }
+}
+
+
+#' Create a temporary directory in the current working directory to store all temporary files
+#'
+#' @keywords internal
+du.create.temp.workdir <- function() {
+  message(" * Create temporary workdir")
+  original_workdir <- getwd()
+
+  timestamp <- format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
+
+  temp_workdir <- paste0(timestamp)
+  temp_workdir <- temp_workdir[which(!(temp_workdir %in% list.files()))]
+
+  dir.create(paste0(getwd(), "/", temp_workdir, sep = ""))
+  setwd(paste0(getwd(), "/", temp_workdir, sep = ""))
+
+  return(c(original_workdir, temp_workdir))
+}
+
+#' Cleanup all the temporary files from the upload
+#'
+#' @param upload should we upload the contents to the backend
+#' @param workdirs a list containing the original workdir and the created workdir
+#'
+#' @keywords internal
+du.clean.temp.workdir <- function(upload, workdirs) {
+  message(" * Reinstate default working directory")
+  original_workdir <- unlist(workdirs)[1]
+  temp_workdir <- unlist(workdirs)[2]
+  setwd(original_workdir)
+  if (upload == TRUE) {
+    message(" * Cleanup temporary directory")
+    unlink(temp_workdir, recursive = T)
+  } else {
+    message(" * Be advised: you need to cleanup the temporary directories yourself now.")
+  }
+}
